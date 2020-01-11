@@ -1,0 +1,34 @@
+[[package]]
+category = "main"
+description = "Python 3.4 Enum backported to 3.3, 3.2, 3.1, 2.7, 2.6, 2.5, and 2.4"
+name = "enum34"
+optional = false
+python-versions = "*"
+version = "1.1.6"
+
+[[package]]
+category = "main"
+description = "Read and modify image EXIF metadata using Python."
+name = "exif"
+optional = false
+python-versions = "*"
+version = "0.8.1"
+
+[package.dependencies]
+enum34 = "*"
+
+[metadata]
+content-hash = "c720390daca364297f9a6af9b46909651700efe063177c0214c0d45ea16f8a85"
+python-versions = ">=3.6"
+
+[metadata.files]
+enum34 = [
+    {file = "enum34-1.1.6-py2-none-any.whl", hash = "sha256:6bd0f6ad48ec2aa117d3d141940d484deccda84d4fcd884f5c3d93c23ecd8c79"},
+    {file = "enum34-1.1.6-py3-none-any.whl", hash = "sha256:644837f692e5f550741432dd3f223bbb9852018674981b1664e5dc339387588a"},
+    {file = "enum34-1.1.6.tar.gz", hash = "sha256:8ad8c4783bf61ded74527bffb48ed9b54166685e4230386a9ed9b1279e2df5b1"},
+    {file = "enum34-1.1.6.zip", hash = "sha256:2d81cbbe0e73112bdfe6ef8576f2238f2ba27dd0d55752a776c41d38b7da2850"},
+]
+exif = [
+    {file = "exif-0.8.1-py3-none-any.whl", hash = "sha256:ae41ed65cd3d51dafb0e8adccc1280fc39d8c27bdffd0581417b1e89352794a7"},
+    {file = "exif-0.8.1.tar.gz", hash = "sha256:108236768be2d68cbe5b41297dc67a3d5dcb2afcbbe1de84fc046f4e00f04ca0"},
+]

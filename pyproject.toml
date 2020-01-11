@@ -1,0 +1,21 @@
+[tool.poetry]
+name = "sort-images"
+description = "Sort images"
+version = "0.1"
+license = "MIT"
+authors = ["Alexander Kaftan"]
+readme = "README.md"
+repository = ""
+classifiers = [
+]
+
+keywords = [
+]
+
+[tool.poetry.dependencies]
+python = ">=3.6"
+exif = "*"
+
+[build-system]
+requires = ["poetry>=1.0"]
+build-backend = "poetry.masonry.api"

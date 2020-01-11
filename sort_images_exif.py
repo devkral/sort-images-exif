@@ -176,10 +176,11 @@ def sortFiles(argob):
         argob.src = [
             Path(src) for src in argob.src
         ]
+    # first have all files, elsewise it is too risky
     files = []
     for src in argob.src:
         for file in src.rglob("*"):
-            if not file.is_file():
+            if not file.is_file() or file.is_symlink():
                 continue
             files.append(file)
     with Pool() as pool:

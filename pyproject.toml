@@ -1,9 +1,9 @@
 [tool.poetry]
-name = "sort-images"
+name = "sort-images-exif"
 description = "Sort images"
 version = "0.1"
 license = "MIT"
-authors = ["Alexander Kaftan"]
+authors = ["Alexander K."]
 readme = "README.md"
 repository = ""
 classifiers = [

@@ -51,7 +51,8 @@ extraction_pattern = re.compile(
 )
 
 
-def processFile(argob, path):
+def processFile(args):
+    argob, path = args
     creation = None
     file_content = ""
     image_exif = None
@@ -184,7 +185,7 @@ def sortFiles(argob):
                 continue
             files.append(file)
     with Pool() as pool:
-        removed = sum(pool.starmap(
+        removed = sum(pool.imap_unordered(
             processFile,
             zip(repeat(argob), files),
             chunksize=8

@@ -3,10 +3,11 @@
 import re
 import argparse
 import logging
+import hashlib
 from itertools import repeat
 from datetime import datetime as dt
 from pathlib import Path
-from multiprocessing import Pool
+from multiprocessing import Pool, Manager
 
 try:
     from exif import Image
@@ -30,10 +31,16 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--replace",
+    action="store_true",
+    help="Replace existing images even they are no duplicates"
+)
+
+parser.add_argument(
     "--pattern",
     help="Pattern for images",
     default=(
-        "{creation:%Y}/{creation:%m}/{creation:%Y-%m-%d_%H:%M:%S}{file_suffix}"
+        "{creation:%Y}/{creation:%m}/{creation:%Y-%m-%d_%H:%M:%S}{suffix}"
     )
 )
 
@@ -54,13 +61,13 @@ extraction_pattern = re.compile(
 def processFile(args):
     argob, path = args
     creation = None
-    file_content = ""
+    file_content_type = ""
     image_exif = None
     image_exif_error = False
     if path.suffix.lower() in {
         ".png", ".tiff", ".jpg", ".jpeg"
     }:
-        file_content = "IMG"
+        file_content_type = "IMG"
         try:
             with path.open(mode='rb') as f:
                 image_exif = Image(f)
@@ -96,7 +103,7 @@ def processFile(args):
     elif path.suffix.lower() in {
         ".mp4", ".webm", ".ogg"
     }:
-        file_content = "MOV"
+        file_content_type = "MOV"
     else:
         if not argob.prune:
             logger.info("unrecognized file: %s", path)
@@ -105,7 +112,7 @@ def processFile(args):
         else:
             path.unlink()
         return 1
-    # check  and potential extract from filename
+    # check and potential extract from filename
     dtnamematch = extraction_pattern.match(path.stem)
     file_prefix = ""
     file_suffix = ""
@@ -129,7 +136,7 @@ def processFile(args):
         logger.debug("extract time from st_ctime: %s", path)
         creation = dt.fromtimestamp(path.stat().st_ctime)
 
-    if image_exif_error and not argob.dry_run:
+    if image_exif_error:
         if argob.dry_run:
             logger.info(
                 "Would fix: %s to %s, of %s",
@@ -137,18 +144,26 @@ def processFile(args):
                 creation.strftime("%Y:%m:%d %H:%M:%S"),
                 path
             )
-
         else:
             image_exif.datetime = creation.strftime("%Y:%m:%d %H:%M:%S")
             image_exif.datetime_original = image_exif.datetime
             with path.open(mode='wb') as f:
                 f.write(image_exif.get_file())
 
+    file_hash = hashlib.blake2b(digest_size=8)
+    with path.open(mode='rb') as f:
+        buffer = f.read(512000)
+        while buffer != b"":
+            file_hash.update(buffer)
+            buffer = f.read(512000)
+    file_hash = file_hash.hexdigest()
+
     replacestr = argob.pattern.format(
         creation=creation,
-        file_prefix=file_prefix,
-        file_suffix=file_suffix,
-        file_content=file_content
+        prefix=file_prefix,
+        suffix=file_suffix,
+        type=file_content_type,
+        hash=file_hash
     )
     replace_base, replace_name = replacestr.rsplit("/", 1)
     if dtnamematch:
@@ -161,11 +176,45 @@ def processFile(args):
         )
     if newpath == path:
         pass
-    elif argob.dry_run:
-        logger.info("Would rename: %s to %s", path, newpath)
     else:
-        newpath.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
-        path.rename(newpath)
+        _strnewpath = str(newpath)
+        conflict = False
+        duplicate = False
+        oldhash = None
+        with argob.sharedns_lock:
+            if _strnewpath in argob.sharedns.existing:
+                argob.sharedns.existing[_strnewpath].append(_strnewpath)
+                conflict = True
+                oldhash = argob.sharedns.hashes.get(_strnewpath)
+                if argob.replace:
+                    argob.sharedns.hashes[_strnewpath] = file_hash
+            else:
+                argob.sharedns.existing[_strnewpath] = []
+                argob.sharedns.hashes[_strnewpath] = file_hash
+        if conflict:
+            # conflict with previously existing file
+            if not oldhash:
+                oldhash = hashlib.blake2b(digest_size=8)
+                with path.open(mode='rb') as f:
+                    buffer = f.read(512000)
+                    while buffer != b"":
+                        oldhash.update(buffer)
+                        buffer = f.read(512000)
+                oldhash = oldhash.hexdigest()
+            if oldhash == file_hash:
+                conflict = False
+                duplicate = True
+
+        if argob.dry_run:
+            if conflict and argob.replace:
+                logger.info("Would replace: %s with %s", newpath, path)
+            else:
+                logger.info("Would rename: %s to %s", path, newpath)
+        elif not conflict or argob.replace:
+            newpath.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
+            path.rename(newpath)
+        if duplicate and argob.replace:
+            return 1
     return 0
 
 
@@ -180,21 +229,40 @@ def sortFiles(argob):
     # first have all files, elsewise it is too risky
     files = []
     for src in argob.src:
-        for file in src.rglob("*"):
+        # only list non hidden files
+        for file in src.rglob("[!.]*"):
             if not file.is_file() or file.is_symlink():
                 continue
             files.append(file)
-    with Pool() as pool:
-        removed = sum(pool.imap_unordered(
-            processFile,
-            zip(repeat(argob), files),
-            chunksize=8
+    with Manager() as manager:
+        argob.sharedns_lock = manager.Lock()
+        argob.sharedns = manager.Namespace()
+        argob.sharedns.existing = {}
+        argob.sharedns.hashes = {}
+        for file in argob.dest.glob("[!.]*"):
+            if not file.is_file() or file.is_symlink():
+                continue
+            argob.sharedns.existing[str(file)] = []
+        with Pool() as pool:
+            pruned_files = sum(pool.imap_unordered(
+                processFile,
+                zip(repeat(argob), files),
+                chunksize=8
+            ))
+            pool.close()
+            pool.join()
+        logger.info(
+            "Processed images and videos: %s", len(files) - pruned_files
+        )
+        if argob.prune:
+            logger.info("Pruned files: %s", pruned_files)
+        conflicts = dict(filter(
+            lambda x: len(x[1]) > 0, argob.sharedns.existing
         ))
-        pool.close()
-        pool.join()
-    logger.info("Processed images and videos: %s", len(files) - removed)
-    if argob.prune:
-        logger.info("Pruned files: %s", removed)
+        if conflicts:
+            logger.info("files with conflicts:")
+            for newname, oldnames in conflicts.items():
+                logger.info("%s -> %s", oldnames, newname)
 
 
 def main(argv=None):

@@ -57,6 +57,15 @@ extraction_pattern = re.compile(
     ")?(?P<suffix>.*?)$"
 )
 
+img_suffixes = {
+    ".png", ".tiff", ".jpg", ".jpeg"
+}
+mov_suffixes = {
+    ".mp4", ".webm", ".ogg", ".ogv"
+}
+
+media_suffixes = img_suffixes | mov_suffixes
+
 
 def processFile(args):
     argob, path = args
@@ -64,9 +73,8 @@ def processFile(args):
     file_content_type = ""
     image_exif = None
     image_exif_error = False
-    if path.suffix.lower() in {
-        ".png", ".tiff", ".jpg", ".jpeg"
-    }:
+    lower_suffix = path.suffix.lower()
+    if lower_suffix in img_suffixes:
         file_content_type = "IMG"
         try:
             with path.open(mode='rb') as f:
@@ -100,9 +108,7 @@ def processFile(args):
                 logging.warning("Invalid format: %s",
                                 image_exif.datetime_original)
                 image_exif_error = True
-    elif path.suffix.lower() in {
-        ".mp4", ".webm", ".ogg"
-    }:
+    elif lower_suffix in mov_suffixes:
         file_content_type = "MOV"
     else:
         if not argob.prune:
@@ -211,9 +217,12 @@ def processFile(args):
             else:
                 logger.info("Would rename: %s to %s", path, newpath)
         elif not conflict or argob.replace:
-            newpath.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
-            path.rename(newpath)
-        if duplicate and argob.replace:
+            if duplicate:
+                path.unlink()
+            else:
+                newpath.parent.mkdir(mode=0o770, parents=True, exist_ok=True)
+                path.rename(newpath)
+        if duplicate:
             return 1
     return 0
 
@@ -239,8 +248,16 @@ def sortFiles(argob):
         argob.sharedns = manager.Namespace()
         argob.sharedns.existing = {}
         argob.sharedns.hashes = {}
-        for file in argob.dest.glob("[!.]*"):
+        for file in argob.dest.rglob("*"):
             if not file.is_file() or file.is_symlink():
+                continue
+            if file.suffix.lower() not in media_suffixes:
+                if not argob.prune:
+                    logger.info("unrecognized file: %s", file)
+                elif argob.dry_run:
+                    logger.info("Would remove: %s (unrecognized)", file)
+                else:
+                    file.unlink()
                 continue
             argob.sharedns.existing[str(file)] = []
         with Pool() as pool:
@@ -255,7 +272,10 @@ def sortFiles(argob):
             "Processed images and videos: %s", len(files) - pruned_files
         )
         if argob.prune:
-            logger.info("Pruned files: %s", pruned_files)
+            if argob.dry_run:
+                logger.info("Would prune files: %i", pruned_files)
+            else:
+                logger.info("Pruned files: %i", pruned_files)
         conflicts = dict(filter(
             lambda x: len(x[1]) > 0, argob.sharedns.existing
         ))

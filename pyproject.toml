@@ -5,8 +5,14 @@ version = "0.1"
 license = "MIT"
 authors = ["Alexander K."]
 readme = "README.md"
-repository = ""
+repository = "https://github.com/devkral/sort-images-exif"
 classifiers = [
+    "Intended Audience :: System Administrators",
+    "Environment :: Console",
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Education",
+    "Intended Audience :: End Users/Desktop",
+    "Programming Language :: Python :: 3"
 ]
 
 keywords = [

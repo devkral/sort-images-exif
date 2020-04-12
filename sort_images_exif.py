@@ -139,6 +139,7 @@ def rename_file(argob, path, file_info):
                         _strnewpath not in argob.sharedns.existing
                     ):
                         canreplace = True
+                        argob.sharedns.existing[_strnewpath] = []
                 else:
                     argob.sharedns.existing[_strnewpath] = []
             if not conflict or canreplace:

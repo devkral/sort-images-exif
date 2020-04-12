@@ -179,7 +179,7 @@ def processFile(args):
         "file_prefix": "",
         "file_suffix": "",
         "file_content_type": "",
-        "datetime_in_path": False
+        "pattern_in_path": False
     }
     creation = None
     image_exif = None

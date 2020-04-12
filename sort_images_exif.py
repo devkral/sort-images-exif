@@ -61,7 +61,7 @@ img_suffixes = {
     ".png", ".tiff", ".jpg", ".jpeg"
 }
 mov_suffixes = {
-    ".mp4", ".webm", ".ogg", ".ogv"
+    ".mp4", ".webm", ".ogg", ".ogv", ".mov"
 }
 
 media_suffixes = img_suffixes | mov_suffixes

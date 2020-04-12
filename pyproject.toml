@@ -17,6 +17,8 @@ classifiers = [
 
 keywords = [
 ]
+[tool.poetry.scripts]
+sort_images_exif = 'sort_images_exif:main'
 
 [tool.poetry.dependencies]
 python = ">=3.6"

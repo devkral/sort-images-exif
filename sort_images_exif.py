@@ -300,7 +300,7 @@ def sortFiles(argob):
                 else:
                     file.unlink()
                 continue
-            argob.sharedns.existing.add(str(file))
+            argob.sharedns.existing[str(file)] = []
         with Pool() as pool:
             pruned_files = sum(pool.imap_unordered(
                 processFile,

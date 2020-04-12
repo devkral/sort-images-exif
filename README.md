@@ -26,3 +26,6 @@ sort_images_exif <dir>
 
 For more documtentation see:
  --help
+
+
+# TODO

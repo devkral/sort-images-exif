@@ -131,24 +131,20 @@ def rename_file(argob, path, file_info):
         else:
             _strnewpath = str(newpath)
             conflict = False
-            oldhash = None
             with argob.sharedns_lock:
-                if _strnewpath in argob.sharedns.existing:
+                if newpath.exists():
                     conflict = True
-                    oldhash = argob.sharedns.hashes.get(_strnewpath)
-                    if argob.replace and not oldhash:
+                    if (
+                        argob.replace and
+                        _strnewpath not in argob.sharedns.existing
+                    ):
                         canreplace = True
-                        argob.sharedns.hashes[_strnewpath] = \
-                            file_info["file_hash"]
                 else:
                     argob.sharedns.existing[_strnewpath] = []
-                    argob.sharedns.hashes[_strnewpath] = \
-                        file_info["file_hash"]
             if not conflict or canreplace:
                 break
             # conflict with previously existing file
-            if not oldhash:
-                oldhash = generate_hash(newpath)
+            oldhash = generate_hash(newpath)
             if oldhash in {
                 file_info["file_hash"], file_info["old_file_hash"]
             }:
@@ -275,7 +271,7 @@ def sortFiles(argob):
         argob.src = [
             Path(src) for src in argob.src
         ]
-    # first have all files, elsewise it is too risky
+    # first have all files, elsewise it is too risky when dest and src overlap
     files = []
     for src in argob.src:
         # only list non hidden files in src
@@ -287,7 +283,6 @@ def sortFiles(argob):
         argob.sharedns_lock = manager.Lock()
         argob.sharedns = manager.Namespace()
         argob.sharedns.existing = {}
-        argob.sharedns.hashes = {}
         # find all files
         for file in argob.dest.rglob("*"):
             if not file.is_file() or file.is_symlink():
@@ -299,8 +294,6 @@ def sortFiles(argob):
                     logger.info("Would remove: %s (unrecognized)", file)
                 else:
                     file.unlink()
-                continue
-            argob.sharedns.existing[str(file)] = []
         with Pool() as pool:
             pruned_files = sum(pool.imap_unordered(
                 processFile,

@@ -72,7 +72,7 @@ def processFile(args):
     creation = None
     file_content_type = ""
     image_exif = None
-    image_exif_error = False
+    image_exif_date_error = False
     lower_suffix = path.suffix.lower()
     if lower_suffix in img_suffixes:
         file_content_type = "IMG"
@@ -80,24 +80,17 @@ def processFile(args):
             with path.open(mode='rb') as f:
                 image_exif = Image(f)
         except Exception as exc:
-            logger.error(exc)
-        if not image_exif:
-            if not argob.prune:
-                logger.info("non-image with image ending: %s", path)
-            elif argob.dry_run:
-                logger.info("Would remove: %s", path)
-            else:
-                path.unlink()
-            return 1
-        if not image_exif.has_exif:
-            logger.debug("image has no exif data: %s", path)
+            logger.debug("Exception while reading exif: %s" % exc)
+        if not image_exif or not image_exif.has_exif:
+            logger.debug("image has no exif data/is not compatible: %s", path)
+            image_exif = None
         elif hasattr(image_exif, "datetime"):
             try:
                 creation = \
                     dt.strptime(image_exif.datetime, "%Y:%m:%d %H:%M:%S")
             except ValueError:
                 logging.warning("Invalid format: %s", image_exif.datetime)
-                image_exif_error = True
+                image_exif_date_error = True
         elif hasattr(image_exif, "datetime_original"):
             try:
                 creation = \
@@ -107,7 +100,7 @@ def processFile(args):
             except ValueError:
                 logging.warning("Invalid format: %s",
                                 image_exif.datetime_original)
-                image_exif_error = True
+                image_exif_date_error = True
     elif lower_suffix in mov_suffixes:
         file_content_type = "MOV"
     else:
@@ -142,7 +135,7 @@ def processFile(args):
         logger.debug("extract time from st_ctime: %s", path)
         creation = dt.fromtimestamp(path.stat().st_ctime)
 
-    if image_exif_error:
+    if image_exif_date_error:
         if argob.dry_run:
             logger.info(
                 "Would fix: %s to %s, of %s",
@@ -174,11 +167,12 @@ def processFile(args):
     replace_base, replace_name = replacestr.rsplit("/", 1)
     if dtnamematch:
         new_name = extraction_pattern.sub(replace_name, path.stem, count=1)
-        new_name = "{}{}".format(new_name, path.suffix)
+        new_name = "{}{}".format(new_name, lower_suffix)
         newpath = Path(argob.dest, replace_base, new_name)
     else:
         newpath = Path(
-            argob.dest, replace_base, "{}_{}".format(replace_name, path.stem)
+            argob.dest, replace_base,
+            "{}_{}{}".format(replace_name, path.stem, lower_suffix)
         )
     if newpath == path:
         pass

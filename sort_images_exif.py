@@ -1,6 +1,7 @@
 #! /usr/bin/env python3
 
 import re
+import os
 import argparse
 import logging
 import hashlib
@@ -332,6 +333,7 @@ def main(argv=None):
             if os.environ.get("DEBUG") == "true"
             else logging.INFO
         )
+    )
     sortFiles(parser.parse_args(argv))
 
 

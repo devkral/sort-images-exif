@@ -17,6 +17,11 @@ except ImportError:
 
 logger = logging.getLogger("sort-images")
 
+# should be 3 or lower, as some cameras add 4 digit serial numbers to images
+# like IMG_3892 and may some exist which use - instead _
+max_conflict_digits = 3
+
+
 parser = argparse.ArgumentParser()
 
 parser.add_argument(
@@ -25,6 +30,7 @@ parser.add_argument(
     action="store_true",
     help="Show only actions without performing any changes"
 )
+
 parser.add_argument(
     "--prune",
     action="store_true",
@@ -55,6 +61,11 @@ parser.add_argument(
 parser.add_argument("src", nargs="*")
 parser.add_argument("dest")
 
+extract_conflict_pattern = re.compile(
+    "^(?P<unrelated>.*?)"
+    "(?:-(?P<conflict_hash>[a-f0-9]{16}))?"
+    "(?:-(?P<conflict_counter>[0-9]{1,%s}))?$" % max_conflict_digits
+)
 
 extraction_pattern = re.compile(
     "^(?P<prefix>.*?)"
@@ -98,13 +109,13 @@ def generate_new_name(
     if conflict > 0 and argob.conflict == "counter":
         conflictstr = "-%s" % conflict
     elif conflict > 1 and argob.conflict == "hash":
-        conflictstr = "-%s-%s" % (file_info["file_hash"], conflict)
+        conflictstr = "-%s-%s" % (file_info["file_hash"], conflict-1)
     elif conflict > 0 and argob.conflict == "hash":
         conflictstr = "-%s" % file_info["file_hash"]
 
     replacestr = argob.pattern.format(**replacements)
     replace_base, replace_name = replacestr.rsplit("/", 1)
-    if file_info["pattern_in_path"]:
+    if file_info["dtpattern_in_path"]:
         new_name = extraction_pattern.sub(replace_name, path.stem, count=1)
         new_name = "{}{}{}".format(new_name, conflictstr, path.suffix.lower())
         newpath = Path(argob.dest, replace_base, new_name)
@@ -112,17 +123,26 @@ def generate_new_name(
         newpath = Path(
             argob.dest, replace_base,
             "{}_{}{}{}".format(
-                replace_name, path.stem, conflictstr, path.suffix.lower()
+                replace_name,
+                file_info["cleaned_file_name"],
+                conflictstr,
+                path.suffix.lower()
             )
         )
     return newpath
 
 
 def rename_file(argob, path, file_info):
-    conflict_count = 0
+    conflict_count = file_info["conflict_count"]
     canreplace = False
     duplicate = False
+    max_conflicts = 10 * max_conflict_digits
     while True:
+        if conflict_count >= max_conflicts:
+            logger.critical(
+                "Conflict counter >= %s", max_conflicts
+            )
+            return False
         newpath = generate_new_name(
             argob, path, file_info, conflict=conflict_count
         )
@@ -182,7 +202,10 @@ def processFile(args):
         "file_prefix": "",
         "file_suffix": "",
         "file_content_type": "",
-        "pattern_in_path": False
+        "old_conflict": "",
+        "dtpattern_in_path": False,
+        "conflict_count": 0,
+        "cleaned_file_name": ""
     }
     creation = None
     image_exif = None
@@ -203,7 +226,7 @@ def processFile(args):
                 creation = \
                     dt.strptime(image_exif.datetime, "%Y:%m:%d %H:%M:%S")
             except ValueError:
-                logging.warning("Invalid format: %s", image_exif.datetime)
+                logger.warning("Invalid format: %s", image_exif.datetime)
                 image_exif_date_error = True
         elif hasattr(image_exif, "datetime_original"):
             try:
@@ -212,8 +235,10 @@ def processFile(args):
                         image_exif.datetime_original, "%Y:%m:%d %H:%M:%S"
                     )
             except ValueError:
-                logging.warning("Invalid format: %s",
-                                image_exif.datetime_original)
+                logger.warning(
+                    "Invalid format: %s",
+                    image_exif.datetime_original
+                )
                 image_exif_date_error = True
     elif lower_suffix in mov_suffixes:
         file_info["file_content_type"] = "MOV"
@@ -225,13 +250,34 @@ def processFile(args):
         else:
             path.unlink()
         return 1
-    # check and potential extract from filename
-    dtnamematch = extraction_pattern.match(path.stem)
+    if argob.conflict == "ignore":
+        file_info["cleaned_file_name"] = path.stem
+    else:
+        # find conflict counter and hash
+        conflictmatch = extract_conflict_pattern.match(path.stem).groupdict()
+        file_info["cleaned_file_name"] = conflictmatch["unrelated"]
+        if conflictmatch["conflict_hash"]:
+            if argob.conflict == "hash":
+                # if hash is found, one conflict is indicated
+                file_info["conflict_count"] = 1
+            else:
+                file_info["cleaned_file_name"] = "%s-%s" % (
+                    file_info["cleaned_file_name"],
+                    conflictmatch["conflict_hash"]
+                )
+        # if hash and counter: conflict_count = counter + 1
+        # if counter: conflict_count  = counter
+        # if hash: conflict_count  = 1
+        file_info["conflict_count"] += \
+            int(conflictmatch["conflict_counter"] or 0)
+    # check and potential extract datetime info from filename
+    dtnamematch = extraction_pattern.match(file_info["cleaned_file_name"])
     if dtnamematch:
         dtnamematchg = dtnamematch.groupdict()
         file_info["file_prefix"] = dtnamematchg["prefix"] or ""
         file_info["file_suffix"] = dtnamematchg["suffix"] or ""
-        file_info["pattern_in_path"] = True
+
+        file_info["dtpattern_in_path"] = True
 
         if not creation:
             logger.debug("extract time from path: %s", path)

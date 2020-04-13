@@ -131,17 +131,22 @@ def rename_file(argob, path, file_info):
         else:
             _strnewpath = str(newpath)
             conflict = False
-            with argob.sharedns_lock:
-                if newpath.exists():
-                    conflict = True
-                    if (
-                        argob.replace and
-                        _strnewpath not in argob.sharedns.existing
-                    ):
-                        canreplace = True
-                        argob.sharedns.existing[_strnewpath] = []
-                else:
-                    argob.sharedns.existing[_strnewpath] = []
+            # collides with a not processed file
+            # we need no lock here, files are static
+            if _strnewpath in argob.sharedns.maybe_unprocessed_files:
+                conflict = True
+            else:
+                with argob.sharedns_lock:
+                    if _strnewpath in argob.sharedns.collisions:
+                        conflict = True
+                    elif newpath.exists():
+                        conflict = True
+                        # found old file, not in set
+                        if argob.replace:
+                            canreplace = True
+                            argob.sharedns.collisions[_strnewpath] = []
+                    else:
+                        argob.sharedns.collisions[_strnewpath] = []
             if not conflict or canreplace:
                 break
             # conflict with previously existing file
@@ -153,7 +158,7 @@ def rename_file(argob, path, file_info):
                 break
             elif argob.conflict == "ignore":
                 with argob.sharedns_lock:
-                    argob.sharedns.existing[_strnewpath].append(path)
+                    argob.sharedns.existing[_strnewpath].append(str(path))
 
     if argob.dry_run:
         if canreplace:
@@ -171,6 +176,7 @@ def rename_file(argob, path, file_info):
 
 def processFile(args):
     argob, path = args
+    path = Path(path)
     file_info = {
         "creation": None,
         "file_prefix": "",
@@ -272,31 +278,48 @@ def sortFiles(argob):
         argob.src = [
             Path(src) for src in argob.src
         ]
-    # first have all files, elsewise it is too risky when dest and src overlap
-    files = []
-    for src in argob.src:
-        # only list non hidden files in src
-        for file in src.rglob("[!.]*"):
-            if not file.is_file() or file.is_symlink():
-                continue
-            files.append(file)
-    with Manager() as manager:
-        argob.sharedns_lock = manager.Lock()
-        argob.sharedns = manager.Namespace()
-        argob.sharedns.existing = {}
-        # find all files
+
+    old_pruned_files = 0
+
+    # find all files in dest and cleanup if pruning
+    if argob.prune:
         for file in argob.dest.rglob("*"):
-            if not file.is_file() or file.is_symlink():
+            # prune also symlinks to files
+            if not file.is_file():
                 continue
             if file.suffix.lower() not in media_suffixes:
-                if not argob.prune:
-                    logger.info("unrecognized file: %s", file)
-                elif argob.dry_run:
+                old_pruned_files += 1
+                if argob.dry_run:
                     logger.info("Would remove: %s (unrecognized)", file)
                 else:
                     file.unlink()
+    src_dest_overlap = False
+    files = set()
+    # find relevant files, elsewise it is too risky when dest and src overlap
+    for src in argob.src:
+        if (
+            argob.dest == src
+            or argob.dest in src.parents
+            or src in argob.dest.parents
+        ):
+            src_dest_overlap = True
+        # only list non hidden files in src
+        for file in src.rglob("[!.]*"):
+            # only move real files, ignore symlinks
+            if not file.is_file() or file.is_symlink():
+                continue
+            files.add(str(file))
+    with Manager() as manager:
+        argob.sharedns_lock = manager.Lock()
+        argob.sharedns = manager.Namespace()
+        argob.sharedns.collisions = {}
+        if src_dest_overlap:
+            argob.sharedns.maybe_unprocessed_files = files
+        else:
+            argob.sharedns.maybe_unprocessed_files = set()
+
         with Pool() as pool:
-            pruned_files = sum(pool.imap_unordered(
+            pruned_and_deduplicated_files = sum(pool.imap_unordered(
                 processFile,
                 zip(repeat(argob), files),
                 chunksize=8
@@ -304,15 +327,17 @@ def sortFiles(argob):
             pool.close()
             pool.join()
         logger.info(
-            "Processed unique images and videos: %s", len(files) - pruned_files
+            "Processed unique images and videos: %s",
+            len(files) - pruned_and_deduplicated_files
         )
+        pruned_files = old_pruned_files + pruned_and_deduplicated_files
         if argob.prune:
             if argob.dry_run:
                 logger.info("Would prune files: %i", pruned_files)
             else:
                 logger.info("Pruned files: %i", pruned_files)
         unsolved_conflicts = dict(filter(
-            lambda x: len(x[1]) > 0, argob.sharedns.existing
+            lambda x: len(x[1]) > 0, argob.sharedns.collisions
         ))
         if unsolved_conflicts:
             logger.info("files with conflicts:")
